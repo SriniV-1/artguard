@@ -32,13 +32,21 @@ WORKERS = int(os.environ.get("ARTGUARD_WORKERS", "8"))
 class InferenceService(pb_grpc.InferenceServiceServicer):
     def __init__(self) -> None:
         # Import here so a missing ultralytics fails loudly at startup, not import.
+        import torch
         from ultralytics import YOLO
 
-        print(f"[inference] loading model {MODEL_NAME} …", flush=True)
+        # Prefer the Apple GPU (MPS) or CUDA if present — keeps inference well
+        # under the latency budget; falls back to CPU.
+        self._device = (
+            "mps" if torch.backends.mps.is_available()
+            else "cuda" if torch.cuda.is_available()
+            else "cpu"
+        )
+        print(f"[inference] loading model {MODEL_NAME} on {self._device} …", flush=True)
         self._model = YOLO(MODEL_NAME)
         self._model_name = MODEL_NAME
         # Warm the model with a dummy frame so the first real request is fast.
-        self._model.predict(np.zeros((640, 640, 3), dtype=np.uint8), verbose=False)
+        self._model.predict(np.zeros((640, 640, 3), dtype=np.uint8), device=self._device, verbose=False)
         print("[inference] model ready", flush=True)
 
     def Detect(self, request: pb.DetectRequest, context) -> pb.DetectResponse:
@@ -49,7 +57,7 @@ class InferenceService(pb_grpc.InferenceServiceServicer):
 
         detections = []
         if frame is not None:
-            results = self._model.predict(frame, verbose=False)
+            results = self._model.predict(frame, device=self._device, verbose=False)
             for r in results:
                 names = r.names
                 for box in r.boxes:

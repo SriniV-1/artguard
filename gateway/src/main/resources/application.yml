@@ -9,7 +9,7 @@ spring:
       enabled: true
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/artguard
+    url: jdbc:postgresql://localhost:5433/artguard
     username: artguard
     password: artguard
   jpa:
