@@ -21,3 +21,5 @@ inference/venv/
 
 # Env / secrets
 .env
+dashboard/node_modules/
+dashboard/dist/
