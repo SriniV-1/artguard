@@ -1,0 +1,23 @@
+# Gradle
+.gradle/
+build/
+gateway/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Local machine-specific Gradle config (pins the local JDK path)
+gradle.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+inference/venv/
+*.pt
+
+# Env / secrets
+.env

@@ -1,0 +1,82 @@
+spring:
+  application:
+    name: artguard-gateway
+
+  # Java 21 virtual threads for Spring MVC + @Async work. The frame fan-out to
+  # the inference service runs one virtual thread per in-flight frame.
+  threads:
+    virtual:
+      enabled: true
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/artguard
+    username: artguard
+    password: artguard
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+      properties:
+        max.request.size: 10485760
+        linger.ms: 2
+        compression.type: lz4
+    consumer:
+      group-id: artguard-inference
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+      auto-offset-reset: latest
+      max-poll-records: 16
+      properties:
+        max.partition.fetch.bytes: 10485760
+    listener:
+      concurrency: 3
+      ack-mode: record
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+artguard:
+  # gRPC inference service (Python/YOLOv8)
+  inference:
+    host: localhost
+    port: 50051
+    deadline-ms: 800
+  kafka:
+    frames-topic: artguard.frames
+    # bounded in-flight frames per camera before we drop (backpressure)
+    max-in-flight-per-camera: 8
+  # detection labels that escalate to an incident, with the min confidence each needs
+  alerting:
+    threshold: 0.55
+    alert-labels: knife,scissors,backpack,suitcase,person
+  cameras:
+    # demo sources. type=simulated needs no hardware; type=rtsp uses the url.
+    sources:
+      - id: cam-01
+        name: Gallery A — Mona Lisa
+        type: simulated
+      - id: cam-02
+        name: Gallery B — Sculptures
+        type: simulated
+      - id: cam-03
+        name: East Entrance
+        type: simulated

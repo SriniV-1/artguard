@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package artguard.inference.v1;
+
+option java_multiple_files = true;
+option java_package = "com.artguard.inference.grpc";
+option java_outer_classname = "InferenceProto";
+
+// Object-detection inference over a single video frame. The Java gateway fans
+// frames out to this service (one Python/YOLOv8 worker) over gRPC, one virtual
+// thread per in-flight frame.
+service InferenceService {
+  // Detect objects in a single JPEG-encoded frame.
+  rpc Detect(DetectRequest) returns (DetectResponse);
+
+  // Liveness/readiness — returns once the model is loaded.
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+message DetectRequest {
+  string camera_id      = 1;  // which camera the frame came from
+  uint64 frame_id       = 2;  // monotonic per-camera frame counter
+  int64  capture_ts_ms  = 3;  // epoch millis when the frame was captured
+  bytes  jpeg           = 4;  // JPEG-encoded frame bytes
+}
+
+message Detection {
+  string label      = 1;  // e.g. "person", "knife", "backpack"
+  float  confidence = 2;  // 0..1
+  // Bounding box in pixel coordinates.
+  float  x          = 3;
+  float  y          = 4;
+  float  width      = 5;
+  float  height     = 6;
+}
+
+message DetectResponse {
+  string             camera_id        = 1;
+  uint64             frame_id         = 2;
+  int64              capture_ts_ms    = 3;
+  repeated Detection detections       = 4;
+  float              inference_ms     = 5;  // model time on the Python side
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool   ready = 1;
+  string model = 2;  // e.g. "yolov8n"
+}

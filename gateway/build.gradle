@@ -1,0 +1,91 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.3.5'
+    id 'io.spring.dependency-management' version '1.1.6'
+    id 'com.google.protobuf' version '0.9.4'
+}
+
+group = 'com.artguard'
+version = '0.1.0'
+
+java {
+    // Pin to Java 21 (virtual threads are a stable feature here). Gradle will
+    // provision a JDK 21 toolchain even if a different JDK runs the build.
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+ext {
+    grpcVersion     = '1.66.0'
+    protobufVersion = '3.25.5'
+}
+
+dependencies {
+    // ── Spring Boot ──
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+    // ── Kafka ──
+    implementation 'org.springframework.kafka:spring-kafka'
+
+    // ── Database ──
+    runtimeOnly 'org.postgresql:postgresql'
+    implementation 'org.flywaydb:flyway-core'
+    implementation 'org.flywaydb:flyway-database-postgresql'
+
+    // ── gRPC (client to the Python inference service) ──
+    implementation "io.grpc:grpc-protobuf:${grpcVersion}"
+    implementation "io.grpc:grpc-stub:${grpcVersion}"
+    implementation "io.grpc:grpc-netty-shaded:${grpcVersion}"
+    compileOnly 'org.apache.tomcat:annotations-api:6.0.53'
+
+    // ── RTSP / video frame ingestion (FFmpeg bundled natives) ──
+    implementation 'org.bytedeco:javacv-platform:1.5.10'
+
+    // ── Utilities ──
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+
+    // ── Test ──
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.kafka:spring-kafka-test'
+    testImplementation "io.grpc:grpc-testing:${grpcVersion}"
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:${protobufVersion}"
+    }
+    plugins {
+        grpc {
+            artifact = "io.grpc:protoc-gen-grpc-java:${grpcVersion}"
+        }
+    }
+    generateProtoTasks {
+        all()*.plugins {
+            grpc {}
+        }
+    }
+}
+
+// The shared contract lives at repo-root /proto; point the proto source set at it.
+sourceSets {
+    main {
+        proto {
+            srcDir "${rootDir}/proto"
+        }
+    }
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
