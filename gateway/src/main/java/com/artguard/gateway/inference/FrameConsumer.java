@@ -12,6 +12,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.Header;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
@@ -22,6 +23,7 @@ import org.springframework.stereotype.Component;
  * alerting detection is handed to the incident layer.
  */
 @Component
+@ConditionalOnProperty(name = "artguard.mode", havingValue = "camera")
 public class FrameConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(FrameConsumer.class);
@@ -29,14 +31,18 @@ public class FrameConsumer {
     private final InferenceClient inference;
     private final IncidentService incidents;
     private final Set<String> alertLabels;
+    private final Set<String> rareLabels;
     private final float threshold;
+    private final float rareThreshold;
     private final ExecutorService vthreads = Executors.newVirtualThreadPerTaskExecutor();
 
     public FrameConsumer(InferenceClient inference, IncidentService incidents, ArtGuardProperties props) {
         this.inference = inference;
         this.incidents = incidents;
         this.alertLabels = Set.copyOf(props.alerting().alertLabels());
+        this.rareLabels = props.alerting().rareLabels() == null ? Set.of() : Set.copyOf(props.alerting().rareLabels());
         this.threshold = props.alerting().threshold();
+        this.rareThreshold = props.alerting().rareThreshold();
     }
 
     @KafkaListener(topics = "${artguard.kafka.frames-topic}")
@@ -52,9 +58,14 @@ public class FrameConsumer {
             try {
                 DetectResponse resp = inference.detect(cameraId, frameId, captureTs, jpeg);
                 for (Detection d : resp.getDetectionsList()) {
-                    if (d.getConfidence() >= threshold && alertLabels.contains(d.getLabel())) {
+                    if (!alertLabels.contains(d.getLabel())) continue;
+                    // rare labels (weapons / unattended items) must clear a much
+                    // higher bar, so the feed is dominated by person detections.
+                    float required = rareLabels.contains(d.getLabel()) ? rareThreshold : threshold;
+                    if (d.getConfidence() >= required) {
                         incidents.onAlertingDetection(
-                                cameraId, camName, d.getLabel(), d.getConfidence(), frameId, captureTs);
+                                cameraId, camName, d.getLabel(), d.getConfidence(), frameId, captureTs,
+                                d.getX(), d.getY(), d.getWidth(), d.getHeight());
                     }
                 }
             } catch (Exception e) {

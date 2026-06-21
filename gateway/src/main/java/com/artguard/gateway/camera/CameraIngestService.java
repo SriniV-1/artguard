@@ -13,6 +13,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
@@ -26,6 +27,7 @@ import org.springframework.stereotype.Service;
  * (inference) from ballooning memory while always serving the freshest frames.
  */
 @Service
+@ConditionalOnProperty(name = "artguard.mode", havingValue = "camera")
 public class CameraIngestService {
 
     private static final Logger log = LoggerFactory.getLogger(CameraIngestService.class);
@@ -37,6 +39,8 @@ public class CameraIngestService {
     private final Map<String, Semaphore> permits = new ConcurrentHashMap<>();
     private final Map<String, AtomicLong> published = new ConcurrentHashMap<>();
     private final Map<String, AtomicLong> dropped = new ConcurrentHashMap<>();
+    // latest JPEG per camera, so the dashboard can show the live frame being analyzed
+    private final Map<String, byte[]> latestFrame = new ConcurrentHashMap<>();
 
     public CameraIngestService(ArtGuardProperties props, KafkaTemplate<String, byte[]> kafka) {
         this.props = props;
@@ -52,8 +56,9 @@ public class CameraIngestService {
             dropped.put(s.id(), new AtomicLong());
 
             FrameSource source = switch (s.type().toLowerCase()) {
-                case "rtsp" -> new RtspFrameSource(s.id(), s.name(), s.url());
-                default     -> new SimulatedFrameSource(s.id(), s.name());
+                case "rtsp"  -> new RtspFrameSource(s.id(), s.name(), s.url());
+                case "video" -> new VideoFileFrameSource(s.id(), s.name(), s.url());
+                default      -> new SimulatedFrameSource(s.id(), s.name());
             };
             sources.add(source);
             source.start(this::publish);
@@ -62,6 +67,7 @@ public class CameraIngestService {
     }
 
     private void publish(Frame frame) {
+        latestFrame.put(frame.cameraId(), frame.jpeg()); // newest frame for the snapshot endpoint
         Semaphore permit = permits.get(frame.cameraId());
         if (permit == null || !permit.tryAcquire()) {
             dropped.get(frame.cameraId()).incrementAndGet(); // backpressure: drop, don't queue
@@ -76,6 +82,11 @@ public class CameraIngestService {
             permit.release();
             if (ex == null) published.get(frame.cameraId()).incrementAndGet();
         });
+    }
+
+    /** Latest JPEG frame for a camera (for the dashboard snapshot), or null. */
+    public byte[] latestFrame(String cameraId) {
+        return latestFrame.get(cameraId);
     }
 
     private String camName(String cameraId) {

@@ -89,3 +89,8 @@ sourceSets {
 tasks.named('test') {
     useJUnitPlatform()
 }
+
+// Run from the repo root so relative paths (e.g. media/*.mp4) resolve.
+tasks.named('bootRun') {
+    workingDir = rootDir
+}

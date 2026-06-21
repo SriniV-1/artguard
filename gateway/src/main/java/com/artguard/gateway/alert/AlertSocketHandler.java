@@ -40,12 +40,18 @@ public class AlertSocketHandler extends TextWebSocketHandler {
         sessions.remove(session);
     }
 
+    /** Broadcast an alert (wrapped as {type:"alert", data:…}). */
     public void broadcast(Alert alert) {
+        send(new Envelope("alert", alert));
+    }
+
+    /** Broadcast any payload as a tagged envelope to all dashboards. */
+    public void send(Object payload) {
         TextMessage msg;
         try {
-            msg = new TextMessage(mapper.writeValueAsString(alert));
+            msg = new TextMessage(mapper.writeValueAsString(payload));
         } catch (IOException e) {
-            log.warn("alert serialize failed: {}", e.getMessage());
+            log.warn("ws serialize failed: {}", e.getMessage());
             return;
         }
         for (WebSocketSession s : sessions) {

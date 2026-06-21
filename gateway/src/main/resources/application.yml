@@ -55,7 +55,9 @@ management:
         include: health,info,metrics
 
 artguard:
-  # gRPC inference service (Python/YOLOv8)
+  # simulation = overhead people-as-dots scene (default); camera = real RTSP/video + YOLOv8
+  mode: simulation
+  # gRPC inference service (Python/YOLOv8) — used in camera mode
   inference:
     host: localhost
     port: 50051
@@ -64,19 +66,26 @@ artguard:
     frames-topic: artguard.frames
     # bounded in-flight frames per camera before we drop (backpressure)
     max-in-flight-per-camera: 8
-  # detection labels that escalate to an incident, with the min confidence each needs
+  # Alerting: person detections (movement in the scene) are the common alert;
+  # weapons / unattended items are rare and must clear a much higher confidence.
   alerting:
-    threshold: 0.55
-    alert-labels: knife,scissors,backpack,suitcase,person
+    threshold: 0.45
+    alert-labels: person,knife,scissors,backpack,suitcase,handbag
+    rare-labels: knife,scissors,backpack,suitcase,handbag
+    rare-threshold: 0.90
   cameras:
-    # demo sources. type=simulated needs no hardware; type=rtsp uses the url.
+    # Zones in the facility. In simulation mode these are overhead views with
+    # people as dots; in camera mode set type=video/rtsp with a url.
     sources:
       - id: cam-01
-        name: Gallery A — Mona Lisa
+        name: West Concourse
         type: simulated
       - id: cam-02
-        name: Gallery B — Sculptures
+        name: Main Gallery
         type: simulated
       - id: cam-03
-        name: East Entrance
+        name: North Entrance
+        type: simulated
+      - id: cam-04
+        name: Loading Dock
         type: simulated

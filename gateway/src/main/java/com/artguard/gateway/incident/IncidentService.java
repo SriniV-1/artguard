@@ -40,8 +40,15 @@ public class IncidentService {
         this.alerts = alerts;
     }
 
+    // throttle: at most one CORROBORATED alert per incident per this window, so
+    // a 5fps stream of the same person doesn't flood the dashboard.
+    private static final long CORROBORATE_BROADCAST_MS = 1500;
+    private final java.util.concurrent.ConcurrentHashMap<Long, Long> lastBroadcast =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     public void onAlertingDetection(String cameraId, String cameraName, String label,
-                                    float confidence, long frameId, long captureTsMs) {
+                                    float confidence, long frameId, long captureTsMs,
+                                    float bx, float by, float bw, float bh) {
         String key = "incident:open:" + cameraId + ":" + label;
         ReentrantLock lock = locks.computeIfAbsent(key, k -> new ReentrantLock());
         lock.lock();
@@ -56,13 +63,21 @@ public class IncidentService {
                 incident = open(cameraId, cameraName, label, confidence, frameId);
                 status = "OPENED";
             }
-            // (re)set the hot-window TTL and broadcast
+            // (re)set the hot-window TTL
             redis.opsForValue().set(key, incident.getId().toString(), OPEN_TTL);
 
-            long latency = Math.max(0, System.currentTimeMillis() - captureTsMs);
-            alerts.broadcast(new Alert(
-                    incident.getId(), cameraId, cameraName, label, confidence,
-                    status, incident.getDetectionCount(), latency, Instant.now()));
+            // Always announce a freshly OPENED incident; rate-limit corroborations.
+            long now = System.currentTimeMillis();
+            boolean isOpen = "OPENED".equals(status);
+            Long prev = lastBroadcast.get(incident.getId());
+            if (isOpen || prev == null || now - prev >= CORROBORATE_BROADCAST_MS) {
+                lastBroadcast.put(incident.getId(), now);
+                long latency = Math.max(0, now - captureTsMs);
+                alerts.broadcast(new Alert(
+                        incident.getId(), cameraId, cameraName, label, confidence,
+                        status, incident.getDetectionCount(), latency,
+                        bx, by, bw, bh, Instant.now()));
+            }
         } finally {
             lock.unlock();
         }

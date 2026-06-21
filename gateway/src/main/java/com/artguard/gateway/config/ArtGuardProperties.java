@@ -15,7 +15,14 @@ public record ArtGuardProperties(
 
     public record Kafka(String framesTopic, int maxInFlightPerCamera) {}
 
-    public record Alerting(float threshold, List<String> alertLabels) {}
+    /**
+     * @param threshold      base confidence for common alerts (person/movement)
+     * @param alertLabels    every label that may raise an alert
+     * @param rareLabels     labels treated as rare/high-bar (weapons, unattended items)
+     * @param rareThreshold  the (higher) confidence rare labels must clear
+     */
+    public record Alerting(float threshold, List<String> alertLabels,
+                           List<String> rareLabels, float rareThreshold) {}
 
     public record Cameras(List<Source> sources) {}
 

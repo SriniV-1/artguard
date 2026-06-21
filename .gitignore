@@ -23,3 +23,6 @@ inference/venv/
 .env
 dashboard/node_modules/
 dashboard/dist/
+
+# large sample videos (camera mode) — re-download via README
+media/*.mp4
