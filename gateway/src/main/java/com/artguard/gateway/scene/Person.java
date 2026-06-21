@@ -1,45 +1,66 @@
 package com.artguard.gateway.scene;
 
+import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * A simulated person tracked from overhead: a point moving in a camera's
- * normalized [0,1]×[0,1] space toward waypoints. Turns "alert" (red) for a
- * window when it triggers suspicious behavior.
+ * A simulated person tracked from overhead: a point that wanders randomly in a
+ * camera's normalized [0,1]×[0,1] space, bouncing off the walls and routing
+ * around room structures. Turns "alert" (red) for a window when it triggers
+ * suspicious behavior.
  */
 public class Person {
+    private static final double BODY_R = 0.012;  // body radius for collision
+    private static final double MARGIN = 0.03;   // keep off the outer wall
+
     final int id;
-    double x, y, tx, ty;
-    double speed;
+    double x, y;
+    private double heading;       // radians
+    private double speed;
     volatile String status = "normal";   // normal | alert
     volatile long alertUntilMs = 0;
 
-    Person(int id) {
+    Person(int id, List<Rect> obstacles) {
         this.id = id;
         var r = ThreadLocalRandom.current();
-        this.x = r.nextDouble(); this.y = r.nextDouble();
-        pickTarget();
-        this.speed = 0.004 + r.nextDouble() * 0.006;
+        // place in free space
+        do { x = rand(); y = rand(); } while (hits(x, y, obstacles));
+        this.heading = r.nextDouble(Math.PI * 2);
+        this.speed = 0.004 + r.nextDouble() * 0.004;
     }
 
-    void pickTarget() {
+    /** Random-walk one step, bouncing off walls and structures. */
+    void step(List<Rect> obstacles) {
         var r = ThreadLocalRandom.current();
-        this.tx = r.nextDouble(); this.ty = r.nextDouble();
-    }
+        // wander: nudge the heading a little each tick
+        heading += (r.nextDouble() - 0.5) * 0.5;
 
-    /** Advance toward the waypoint; pick a new one on arrival. */
-    void step() {
-        double dx = tx - x, dy = ty - y;
-        double dist = Math.hypot(dx, dy);
-        if (dist < 0.02) { pickTarget(); return; }
-        x += dx / dist * speed;
-        y += dy / dist * speed;
-        x = Math.max(0, Math.min(1, x));
-        y = Math.max(0, Math.min(1, y));
+        double nx = x + Math.cos(heading) * speed;
+        double ny = y + Math.sin(heading) * speed;
+
+        // outer walls
+        if (nx < MARGIN || nx > 1 - MARGIN) { heading = Math.PI - heading; nx = clamp(x + Math.cos(heading) * speed); }
+        if (ny < MARGIN || ny > 1 - MARGIN) { heading = -heading;           ny = clamp(y + Math.sin(heading) * speed); }
+
+        // structures: if the step would enter one, turn away and don't pass through
+        if (hits(nx, ny, obstacles)) {
+            heading += Math.PI + (r.nextDouble() - 0.5);  // roughly reverse + jitter
+            double bx = x + Math.cos(heading) * speed, by = y + Math.sin(heading) * speed;
+            if (!hits(bx, by, obstacles)) { nx = clamp(bx); ny = clamp(by); }
+            else { nx = x; ny = y; }                       // cornered: hold this tick
+        }
+
+        x = clamp(nx); y = clamp(ny);
         if (System.currentTimeMillis() > alertUntilMs && "alert".equals(status)) status = "normal";
     }
 
     void raiseAlert(long untilMs) { this.status = "alert"; this.alertUntilMs = untilMs; }
-
     boolean isAlert() { return "alert".equals(status); }
+
+    private static boolean hits(double px, double py, List<Rect> obstacles) {
+        for (Rect o : obstacles) if (o.contains(px, py, BODY_R)) return true;
+        return false;
+    }
+    private static double rand() { return MARGIN + ThreadLocalRandom.current().nextDouble() * (1 - 2 * MARGIN); }
+    private static double clamp(double v) { return Math.max(MARGIN, Math.min(1 - MARGIN, v)); }
 }

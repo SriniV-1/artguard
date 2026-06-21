@@ -123,8 +123,21 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); -web
     linear-gradient(90deg, rgba(255,255,255,0.045) 1px, transparent 1px);
   background-size: 11% 11%;
 }
+/* room structures (overhead) */
+.structure {
+  position: absolute; box-sizing: border-box; border-radius: 2px;
+  background: rgba(120,140,170,0.10);
+  border: 1px solid rgba(150,170,200,0.22);
+}
+.structure.k-wall   { background: rgba(150,170,200,0.20); border-color: rgba(170,190,220,0.30); border-radius: 1px; }
+.structure.k-pillar { background: rgba(150,170,200,0.22); border-radius: 50%; }
+.structure.k-case,
+.structure.k-desk   { background: rgba(77,159,255,0.10); border-color: rgba(77,159,255,0.30); }
+.structure.k-crate  { background: rgba(255,176,32,0.08); border-color: rgba(255,176,32,0.28); }
+.structure.k-barrier{ background: rgba(150,170,200,0.18); border-radius: 1px; }
+
 .person {
-  position: absolute; width: 11px; height: 11px; border-radius: 50%;
+  position: absolute; width: 11px; height: 11px; border-radius: 50%; z-index: 2;
   transform: translate(-50%, -50%);
   background: var(--green); box-shadow: 0 0 8px rgba(46,230,160,0.8);
   /* match the ~100ms scene tick so motion is continuous, not stepped */

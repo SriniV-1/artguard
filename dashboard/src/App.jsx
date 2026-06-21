@@ -219,6 +219,10 @@ function Zone({ zone }) {
     <div className={`zone ${flagged ? "flagged" : ""}`}>
       <div className="zone-floor">
         <div className="zone-grid-lines" />
+        {(zone.structures || []).map((s, i) => (
+          <span key={i} className={`structure k-${s.kind}`}
+                style={{ left: `${s.x * 100}%`, top: `${s.y * 100}%`, width: `${s.w * 100}%`, height: `${s.h * 100}%` }} />
+        ))}
         {(zone.people || []).map((p) => (
           <span key={p.id} className={`person ${p.status === "alert" ? "alert" : ""}`}
                 style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }} />

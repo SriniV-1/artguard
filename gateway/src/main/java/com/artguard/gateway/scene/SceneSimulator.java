@@ -34,7 +34,6 @@ public class SceneSimulator {
     private static final int PEOPLE_PER_CAMERA = 7;
     private static final long TICK_MS = 100;            // 10 fps scene updates
     private static final double SUSPICION_RATE = 0.0006; // rare: mostly-green scene, occasional red
-    private static final long ALERT_HOLD_MS = 5000;
 
     // Mostly person-movement behaviors; object/weapon-style events are rare.
     private static final String[] BEHAVIORS = {
@@ -62,18 +61,19 @@ public class SceneSimulator {
         this.mapper = mapper;
     }
 
-    private record Zone(String id, String name, List<Person> people) {}
+    private record Zone(String id, String name, List<Person> people, List<Rect> obstacles) {}
 
     @PostConstruct
     void start() {
-        int pid = 0;
+        int pid = 0, zi = 0;
         for (var s : props.cameras().sources()) {
+            var obstacles = RoomLayouts.forIndex(zi++);
             var people = new ArrayList<Person>();
-            for (int i = 0; i < PEOPLE_PER_CAMERA; i++) people.add(new Person(pid++));
-            zones.add(new Zone(s.id(), s.name(), people));
+            for (int i = 0; i < PEOPLE_PER_CAMERA; i++) people.add(new Person(pid++, obstacles));
+            zones.add(new Zone(s.id(), s.name(), people, obstacles));
         }
         loop = Thread.ofVirtual().name("scene-sim").start(this::run);
-        log.info("Scene simulator started: {} zones x {} people", zones.size(), PEOPLE_PER_CAMERA);
+        log.info("Scene simulator started: {} zones x {} people (with room structures)", zones.size(), PEOPLE_PER_CAMERA);
     }
 
     private void run() {
@@ -81,7 +81,7 @@ public class SceneSimulator {
             long t0 = System.currentTimeMillis();
             for (Zone z : zones) {
                 for (Person p : z.people()) {
-                    p.step();
+                    p.step(z.obstacles());
                     if (!p.isAlert() && ThreadLocalRandom.current().nextDouble() < SUSPICION_RATE) {
                         trigger(z, p);
                     }
@@ -94,9 +94,11 @@ public class SceneSimulator {
     }
 
     private void trigger(Zone z, Person p) {
-        String behavior = BEHAVIORS[ThreadLocalRandom.current().nextInt(BEHAVIORS.length)];
-        double conf = 0.6 + ThreadLocalRandom.current().nextDouble() * 0.39;
-        p.raiseAlert(System.currentTimeMillis() + ALERT_HOLD_MS);
+        var r = ThreadLocalRandom.current();
+        String behavior = BEHAVIORS[r.nextInt(BEHAVIORS.length)];
+        double conf = 0.6 + r.nextDouble() * 0.39;
+        // organic, not fixed: each alert holds for a random 4–9s
+        p.raiseAlert(System.currentTimeMillis() + 4000 + r.nextInt(5000));
         var ev = new TrackEvent(z.id(), z.name(), p.id, behavior, conf, p.x, p.y, System.currentTimeMillis());
         try {
             kafka.send(props.kafka().framesTopic(), z.id(), mapper.writeValueAsBytes(ev));
@@ -104,6 +106,9 @@ public class SceneSimulator {
             log.debug("track publish failed: {}", e.getMessage());
         }
     }
+
+    // structures don't change, so serialize each zone's layout once
+    private final Map<String, List<Map<String, Object>>> obstacleJson = new java.util.HashMap<>();
 
     private void broadcastScene() {
         var cams = new ArrayList<Map<String, Object>>();
@@ -115,7 +120,12 @@ public class SceneSimulator {
                     "x", round(p.x), "y", round(p.y),
                     "status", p.status));
             }
-            cams.add(Map.of("id", z.id(), "name", z.name(), "people", people));
+            cams.add(Map.of(
+                "id", z.id(), "name", z.name(),
+                "people", people,
+                "structures", obstacleJson.computeIfAbsent(z.id(), k -> z.obstacles().stream()
+                    .map(o -> Map.<String, Object>of("x", o.x(), "y", o.y(), "w", o.w(), "h", o.h(), "kind", o.kind()))
+                    .toList())));
         }
         socket.send(new Envelope("scene", Map.of("cameras", cams)));
     }
