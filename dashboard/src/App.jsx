@@ -36,8 +36,10 @@ export default function App() {
   const [selected, setSelected] = useState(null);   // selected alert {_k,...}
   const [expanded, setExpanded] = useState(null);    // expanded zone id
   const [facility, setFacility] = useState(null);    // facility-alert state {reason,zone,ts}
+  const [resolution, setResolution] = useState(null); // resolution popup {zone,label}
   const pausedRef = useRef(false);
   const connectedRef = useRef(false);
+  const resolveTimer = useRef(null);
   const seq = useRef(1);
   const clock = useClock();
   pausedRef.current = paused;
@@ -102,17 +104,28 @@ export default function App() {
   };
   const focus = selected ? { cameraId: selected.cameraId, personId: selected.personId } : null;
 
-  // facility-wide alert
+  // facility-wide alert. Escalating an alert with a subject schedules an
+  // automatic response: after 5s the subject is removed (escorted out) and a
+  // resolution popup confirms the disturbance was dealt with.
+  const POST = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => {});
   const declareFacility = () => {
-    const z = selected?.cameraName || "";
-    const reason = selected ? `${selected.label} — operator escalation` : "Operator escalation";
-    fetch("/api/facility-alert", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ active: true, reason, zone: z }) }).catch(() => {});
+    const subj = selected ? { cameraId: selected.cameraId, personId: selected.personId, cameraName: selected.cameraName, label: selected.label } : null;
+    POST("/api/facility-alert", { active: true, reason: selected ? `${selected.label} — operator escalation` : "Operator escalation", zone: subj?.cameraName || "" });
+    if (subj) {
+      clearTimeout(resolveTimer.current);
+      resolveTimer.current = setTimeout(() => {
+        POST("/api/resolve", { cameraId: subj.cameraId, personId: subj.personId }); // remove the dot (all dashboards)
+        POST("/api/facility-alert", { active: false });                              // stand down
+        setResolution({ zone: subj.cameraName, label: subj.label });
+      }, 5000);
+    }
   };
-  const clearFacility = () => {
-    fetch("/api/facility-alert", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ active: false }) }).catch(() => setFacility(null));
-  };
+  const clearFacility = () => POST("/api/facility-alert", { active: false }).then(() => setFacility(null));
+  const ackResolution = () => { setResolution(null); setExpanded(null); setSelected(null); };
+
+  // triage: mark an alert benign (false alarm → dot back to green) or dismiss it
+  const markBenign = (a) => { POST("/api/benign", { cameraId: a.cameraId, personId: a.personId }); setAlerts((p) => p.filter((x) => x._k !== a._k)); };
+  const dismiss = (a) => setAlerts((p) => p.filter((x) => x._k !== a._k));
 
   const expandedZone = expanded ? zones.find((z) => z.id === expanded) : null;
 
@@ -202,6 +215,10 @@ export default function App() {
                     )}
                   </div>
                   <div className={`alert-lat ${a.latencyMs < 200 ? "ok" : "warn"}`}>{a.latencyMs}<span>ms</span></div>
+                  <div className="alert-actions">
+                    <button className="aa benign" title="Mark benign (false alarm)" onClick={(e) => { e.stopPropagation(); markBenign(a); }}>Benign</button>
+                    <button className="aa dismiss" title="Dismiss" onClick={(e) => { e.stopPropagation(); dismiss(a); }}>✕</button>
+                  </div>
                 </div>
               );
             })}
@@ -228,6 +245,20 @@ export default function App() {
               <button className="zoom-close" onClick={() => setExpanded(null)}>✕</button>
             </div>
             <ZoneFloor zone={expandedZone} focus={focus} big />
+          </div>
+        </div>
+      )}
+
+      {resolution && (
+        <div className="resolve-backdrop" onClick={ackResolution}>
+          <div className="resolve" onClick={(e) => e.stopPropagation()}>
+            <div className="resolve-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg></div>
+            <div className="resolve-title">DISTURBANCE RESOLVED</div>
+            <p className="resolve-msg">
+              Security was alerted to the <b>{resolution.label}</b> incident in <b>{resolution.zone}</b>.
+              The subject was investigated and escorted out — the disturbance has been dealt with.
+            </p>
+            <button className="resolve-ok" onClick={ackResolution}>Acknowledge</button>
           </div>
         </div>
       )}

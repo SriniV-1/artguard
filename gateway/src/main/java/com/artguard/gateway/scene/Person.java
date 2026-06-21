@@ -17,8 +17,7 @@ public class Person {
     double x, y;
     private double heading;       // radians
     private double speed;
-    volatile String status = "normal";   // normal | alert
-    volatile long alertUntilMs = 0;
+    volatile String status = "normal";   // normal | alert (cleared only by an operator)
 
     Person(int id, List<Rect> obstacles) {
         this.id = id;
@@ -51,10 +50,12 @@ public class Person {
         }
 
         x = clamp(nx); y = clamp(ny);
-        if (System.currentTimeMillis() > alertUntilMs && "alert".equals(status)) status = "normal";
+        // status no longer auto-clears: a flagged subject stays red until an
+        // operator marks it benign or it's escorted out.
     }
 
-    void raiseAlert(long untilMs) { this.status = "alert"; this.alertUntilMs = untilMs; }
+    void raiseAlert() { this.status = "alert"; }
+    void clearAlert() { this.status = "normal"; }
     boolean isAlert() { return "alert".equals(status); }
 
     private static boolean hits(double px, double py, List<Rect> obstacles) {

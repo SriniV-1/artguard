@@ -6,6 +6,7 @@ import com.artguard.gateway.camera.CameraIngestService;
 import com.artguard.gateway.config.ArtGuardProperties;
 import com.artguard.gateway.incident.Incident;
 import com.artguard.gateway.incident.IncidentService;
+import com.artguard.gateway.scene.SceneSimulator;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -27,13 +28,17 @@ public class ApiController {
     private final AlertSocketHandler alerts;
     // present only in camera mode; absent in simulation mode
     private final ObjectProvider<CameraIngestService> cameras;
+    // present only in simulation mode
+    private final ObjectProvider<SceneSimulator> simulator;
 
     public ApiController(ArtGuardProperties props, IncidentService incidents,
-                         AlertSocketHandler alerts, ObjectProvider<CameraIngestService> cameras) {
+                         AlertSocketHandler alerts, ObjectProvider<CameraIngestService> cameras,
+                         ObjectProvider<SceneSimulator> simulator) {
         this.props = props;
         this.incidents = incidents;
         this.alerts = alerts;
         this.cameras = cameras;
+        this.simulator = simulator;
     }
 
     @GetMapping("/cameras")
@@ -83,6 +88,24 @@ public class ApiController {
             "zone", zone == null ? "" : zone,
             "ts", Instant.now().toString())));
         return Map.of("ok", true, "active", active);
+    }
+
+    /** Resolve an incident: remove the tracked subject (escorted out) from the scene. */
+    @PostMapping("/resolve")
+    public Map<String, Object> resolve(@RequestBody Map<String, Object> body) {
+        SceneSimulator sim = simulator.getIfAvailable();
+        boolean removed = sim != null && sim.removePerson(
+            String.valueOf(body.get("cameraId")), ((Number) body.getOrDefault("personId", -1)).intValue());
+        return Map.of("ok", true, "removed", removed);
+    }
+
+    /** Mark an alert benign (false alarm): clear the subject's flag back to normal. */
+    @PostMapping("/benign")
+    public Map<String, Object> benign(@RequestBody Map<String, Object> body) {
+        SceneSimulator sim = simulator.getIfAvailable();
+        boolean cleared = sim != null && sim.markBenign(
+            String.valueOf(body.get("cameraId")), ((Number) body.getOrDefault("personId", -1)).intValue());
+        return Map.of("ok", true, "cleared", cleared);
     }
 
     @GetMapping("/stats")

@@ -9,6 +9,7 @@ import jakarta.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ThreadLocalRandom;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,8 +33,9 @@ public class SceneSimulator {
 
     private static final Logger log = LoggerFactory.getLogger(SceneSimulator.class);
     private static final int PEOPLE_PER_CAMERA = 7;
-    private static final long TICK_MS = 100;            // 10 fps scene updates
-    private static final double SUSPICION_RATE = 0.0006; // rare: mostly-green scene, occasional red
+    private static final long TICK_MS = 100;             // 10 fps scene updates
+    private static final double SUSPICION_RATE = 0.00025; // low: infrequent alerts for the operator to triage
+    private static final int MAX_FLAGGED_PER_ZONE = 2;    // bound un-triaged alerts so they don't pile up
 
     // Mostly person-movement behaviors; object/weapon-style events are rare.
     private static final String[] BEHAVIORS = {
@@ -68,7 +70,9 @@ public class SceneSimulator {
         int pid = 0, zi = 0;
         for (var s : props.cameras().sources()) {
             var obstacles = RoomLayouts.forIndex(zi++);
-            var people = new ArrayList<Person>();
+            // CopyOnWrite so a person can be removed (escorted out) from a REST
+            // thread while the sim loop iterates safely.
+            var people = new CopyOnWriteArrayList<Person>();
             for (int i = 0; i < PEOPLE_PER_CAMERA; i++) people.add(new Person(pid++, obstacles));
             zones.add(new Zone(s.id(), s.name(), people, obstacles));
         }
@@ -80,10 +84,13 @@ public class SceneSimulator {
         while (running) {
             long t0 = System.currentTimeMillis();
             for (Zone z : zones) {
+                long flagged = z.people().stream().filter(Person::isAlert).count();
                 for (Person p : z.people()) {
                     p.step(z.obstacles());
-                    if (!p.isAlert() && ThreadLocalRandom.current().nextDouble() < SUSPICION_RATE) {
+                    if (!p.isAlert() && flagged < MAX_FLAGGED_PER_ZONE
+                            && ThreadLocalRandom.current().nextDouble() < SUSPICION_RATE) {
                         trigger(z, p);
+                        flagged++;
                     }
                 }
             }
@@ -97,8 +104,7 @@ public class SceneSimulator {
         var r = ThreadLocalRandom.current();
         String behavior = BEHAVIORS[r.nextInt(BEHAVIORS.length)];
         double conf = 0.6 + r.nextDouble() * 0.39;
-        // organic, not fixed: each alert holds for a random 4–9s
-        p.raiseAlert(System.currentTimeMillis() + 4000 + r.nextInt(5000));
+        p.raiseAlert();   // stays flagged until an operator triages it
         var ev = new TrackEvent(z.id(), z.name(), p.id, behavior, conf, p.x, p.y, System.currentTimeMillis());
         try {
             kafka.send(props.kafka().framesTopic(), z.id(), mapper.writeValueAsBytes(ev));
@@ -131,6 +137,24 @@ public class SceneSimulator {
     }
 
     private static double round(double v) { return Math.round(v * 1000) / 1000.0; }
+
+    /** Remove a tracked subject (escorted out after a resolved incident). */
+    public boolean removePerson(String cameraId, int personId) {
+        for (Zone z : zones) {
+            if (z.id().equals(cameraId)) return z.people().removeIf(p -> p.id == personId);
+        }
+        return false;
+    }
+
+    /** Clear a subject's flag — operator marked the alert benign (false alarm). */
+    public boolean markBenign(String cameraId, int personId) {
+        for (Zone z : zones) {
+            if (z.id().equals(cameraId)) {
+                for (Person p : z.people()) if (p.id == personId) { p.clearAlert(); return true; }
+            }
+        }
+        return false;
+    }
 
     @PreDestroy
     void stop() {
