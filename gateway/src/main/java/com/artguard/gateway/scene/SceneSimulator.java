@@ -33,7 +33,7 @@ public class SceneSimulator {
     private static final Logger log = LoggerFactory.getLogger(SceneSimulator.class);
     private static final int PEOPLE_PER_CAMERA = 7;
     private static final long TICK_MS = 100;            // 10 fps scene updates
-    private static final double SUSPICION_RATE = 0.0009; // rare: mostly-green scene, occasional red
+    private static final double SUSPICION_RATE = 0.0006; // rare: mostly-green scene, occasional red
     private static final long ALERT_HOLD_MS = 5000;
 
     // Mostly person-movement behaviors; object/weapon-style events are rare.

@@ -36,6 +36,7 @@ export default function App() {
   const [paused, setPaused] = useState(false);
   const [selected, setSelected] = useState(null);
   const pausedRef = useRef(false);
+  const connectedRef = useRef(false);
   const seq = useRef(1);
   const clock = useClock();
   pausedRef.current = paused;
@@ -48,9 +49,9 @@ export default function App() {
       setAlerts((prev) => [{ ...a, _k: seq.current++ }, ...prev].slice(0, 50));
     };
 
-    // ── demo simulation (frontend) if backend is unreachable ──
+    // ── demo simulation (frontend) — ONLY when the backend is unreachable ──
     const startDemo = () => {
-      if (!alive || sim) return;
+      if (!alive || sim || connectedRef.current) return; // never run alongside the live WS
       setDemo(true);
       const zones = FALLBACK_ZONES.map((z) => ({
         ...z, people: Array.from({ length: 7 }, (_, i) => ({
@@ -85,7 +86,12 @@ export default function App() {
         const proto = location.protocol === "https:" ? "wss" : "ws";
         ws = new WebSocket(`${proto}://${location.host}/ws/alerts`);
       } catch { startDemo(); return; }
-      ws.onopen = () => { if (!alive) return; setConnected(true); setDemo(false); clearInterval(sim); sim = null; };
+      ws.onopen = () => {
+        if (!alive) return;
+        connectedRef.current = true; setConnected(true); setDemo(false);
+        clearInterval(sim); sim = null;          // stop any demo feed once live
+        clearTimeout(kick);
+      };
       ws.onmessage = (e) => {
         try {
           const m = JSON.parse(e.data);
@@ -93,12 +99,17 @@ export default function App() {
           else if (m.type === "alert") onAlert(m.data);
         } catch {}
       };
-      ws.onclose = () => { if (!alive) return; setConnected(false); startDemo(); retry = setTimeout(connect, 4000); };
+      ws.onclose = () => {
+        if (!alive) return;
+        connectedRef.current = false; setConnected(false);
+        startDemo(); retry = setTimeout(connect, 4000);
+      };
       ws.onerror = () => { try { ws.close(); } catch {} };
     };
 
     connect();
-    const kick = setTimeout(() => { if (!connected) startDemo(); }, 1200);
+    // only fall back to the demo if we haven't connected within 1.5s
+    const kick = setTimeout(() => { if (!connectedRef.current) startDemo(); }, 1500);
     return () => { alive = false; clearTimeout(kick); clearTimeout(retry); clearInterval(sim); if (ws) { ws.onclose = null; ws.close(); } };
   }, []); // eslint-disable-line
 
