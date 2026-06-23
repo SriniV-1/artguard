@@ -294,7 +294,7 @@ export default function App() {
                           <span className="subj-dot" style={{ background: sev.color }} />
                           <div className="subj-main">
                             <div className="subj-label">{label} <span className="subj-id">#{p.id}</span></div>
-                            <div className="subj-meta">{a ? `${(a.confidence * 100).toFixed(0)}% · ${a.latencyMs ?? "—"}ms` : "spotlight to inspect"}</div>
+                            <div className="subj-meta">{a ? `${(a.confidence * 100).toFixed(0)}% · ${a.latencyMs ?? "—"}ms` : "click to locate on map"}</div>
                           </div>
                           <div className="subj-actions">
                             <button className="aa benign" title="Mark benign (false alarm)"
