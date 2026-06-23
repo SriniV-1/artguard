@@ -129,6 +129,28 @@ export default function App() {
 
   const expandedZone = expanded ? zones.find((z) => z.id === expanded) : null;
 
+  // ----- expanded-zone interactivity: nav between zones, per-subject controls -----
+  const zoneIdx = expandedZone ? zones.findIndex((z) => z.id === expandedZone.id) : -1;
+  const navZone = (dir) => {
+    if (zones.length < 2 || zoneIdx < 0) return;
+    setExpanded(zones[(zoneIdx + dir + zones.length) % zones.length].id);
+  };
+  const alertForSubject = (zid, pid) => alerts.find((a) => a.cameraId === zid && a.personId === pid);
+  const selectSubject = (z, p) => {
+    const a = alertForSubject(z.id, p.id);
+    setSelected(a || {
+      _k: `subj-${z.id}-${p.id}`, cameraId: z.id, cameraName: z.name, personId: p.id,
+      label: "Flagged subject", confidence: 0.8, incidentId: null, latencyMs: null,
+    });
+  };
+  const benignSubject = (z, p) => {
+    POST("/api/benign", { cameraId: z.id, personId: p.id });
+    setAlerts((prev) => prev.filter((x) => !(x.cameraId === z.id && x.personId === p.id)));
+    if (selected && selected.cameraId === z.id && selected.personId === p.id) setSelected(null);
+  };
+  const flaggedSubjects = expandedZone ? (expandedZone.people || []).filter((p) => p.status === "alert") : [];
+  const zoneAlerts = expandedZone ? alerts.filter((a) => a.cameraId === expandedZone.id).slice(0, 8) : [];
+
   return (
     <div className="app">
       {facility && (
@@ -230,21 +252,84 @@ export default function App() {
         <div className="zoom-backdrop" onClick={() => { setExpanded(null); }}>
           <div className="zoom" onClick={(e) => e.stopPropagation()}>
             <div className="zoom-head">
-              <span className="zoom-name">{expandedZone.name}</span>
-              {selected && selected.cameraId === expandedZone.id ? (
-                <span className="zoom-alert" style={{ "--sev": sevOf(selected.label).color }}>
-                  <span className="zoom-alert-dot" /> {selected.label} · subject #{selected.personId} · {(selected.confidence * 100).toFixed(0)}%
+              <button className="zoom-nav" title="Previous zone" onClick={() => navZone(-1)}>◀</button>
+              <div className="zoom-id">
+                <span className="zoom-name">{expandedZone.name}</span>
+                <span className="zoom-sub">
+                  Zone {zoneIdx + 1} of {zones.length} · {(expandedZone.people || []).length} tracked · {flaggedSubjects.length} flagged
                 </span>
-              ) : (
-                <span className="zoom-sub">{(expandedZone.people || []).length} tracked · {(expandedZone.people || []).filter((p) => p.status === "alert").length} flagged</span>
-              )}
-              {selected && selected.cameraId === expandedZone.id && !facility && (
-                <button className="zoom-escalate" onClick={declareFacility}>⚠ Escalate to facility alert</button>
-              )}
-              {facility && <span className="zoom-escalated">● Facility alert active</span>}
+              </div>
+              <button className="zoom-nav" title="Next zone" onClick={() => navZone(1)}>▶</button>
+              <div className="zoom-head-spacer" />
+              {facility
+                ? <span className="zoom-escalated">● Facility alert active</span>
+                : <button className="zoom-escalate" onClick={declareFacility}
+                          title={selected && selected.cameraId === expandedZone.id
+                            ? `Escalate ${selected.label} · subject #${selected.personId}`
+                            : "Declare a facility-wide alert"}>
+                    ⚠ {selected && selected.cameraId === expandedZone.id ? "Escalate subject" : "Facility alert"}
+                  </button>}
               <button className="zoom-close" onClick={() => setExpanded(null)}>✕</button>
             </div>
-            <ZoneFloor zone={expandedZone} focus={focus} big />
+
+            <div className="zoom-body">
+              <div className="zoom-floor-wrap">
+                <ZoneFloor zone={expandedZone} focus={focus} big onPick={(p) => selectSubject(expandedZone, p)} />
+                <div className="zoom-hint">Click a subject to spotlight and act on it.</div>
+              </div>
+
+              <aside className="zoom-panel">
+                <div className="zp-section">
+                  <div className="zp-label">Flagged subjects <span className="zp-count">{flaggedSubjects.length}</span></div>
+                  {flaggedSubjects.length === 0 && <div className="zp-empty">No flagged subjects in this zone.</div>}
+                  <div className="subj-list">
+                    {flaggedSubjects.map((p) => {
+                      const a = alertForSubject(expandedZone.id, p.id);
+                      const label = a ? a.label : "Flagged subject";
+                      const sev = sevOf(label);
+                      const isSel = selected && selected.cameraId === expandedZone.id && selected.personId === p.id;
+                      return (
+                        <div key={p.id} className={`subj ${isSel ? "sel" : ""}`} style={{ "--sev": sev.color }}
+                             onClick={() => selectSubject(expandedZone, p)}>
+                          <span className="subj-dot" style={{ background: sev.color }} />
+                          <div className="subj-main">
+                            <div className="subj-label">{label} <span className="subj-id">#{p.id}</span></div>
+                            <div className="subj-meta">{a ? `${(a.confidence * 100).toFixed(0)}% · ${a.latencyMs ?? "—"}ms` : "spotlight to inspect"}</div>
+                          </div>
+                          <div className="subj-actions">
+                            <button className="aa benign" title="Mark benign (false alarm)"
+                                    onClick={(e) => { e.stopPropagation(); benignSubject(expandedZone, p); }}>Benign</button>
+                            {!facility && (
+                              <button className="aa escalate" title="Escalate to facility alert"
+                                      onClick={(e) => { e.stopPropagation(); selectSubject(expandedZone, p); declareFacility(); }}>⚠</button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="zp-section">
+                  <div className="zp-label">Zone activity <span className="zp-count">{zoneAlerts.length}</span></div>
+                  {zoneAlerts.length === 0 && <div className="zp-empty">No recent alerts here.</div>}
+                  <div className="zone-alert-list">
+                    {zoneAlerts.map((a) => {
+                      const sev = sevOf(a.label);
+                      const isSel = selected && selected._k === a._k;
+                      return (
+                        <div key={a._k} className={`za ${isSel ? "sel" : ""}`} style={{ "--sev": sev.color }}
+                             onClick={() => setSelected(a)}>
+                          <span className="za-tag" style={{ background: sev.color }}>{sev.tag}</span>
+                          <span className="za-label">{a.label}</span>
+                          <span className="za-time">{new Date(a.timestamp).toLocaleTimeString("en-US", { hour12: false })}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </aside>
+            </div>
           </div>
         </div>
       )}
@@ -266,7 +351,7 @@ export default function App() {
   );
 }
 
-function ZoneFloor({ zone, focus, big }) {
+function ZoneFloor({ zone, focus, big, onPick }) {
   const focusId = focus && focus.cameraId === zone.id ? focus.personId : null;
   return (
     <div className={`zone-floor ${big ? "big" : ""}`}>
@@ -276,8 +361,10 @@ function ZoneFloor({ zone, focus, big }) {
               style={{ left: `${s.x * 100}%`, top: `${s.y * 100}%`, width: `${s.w * 100}%`, height: `${s.h * 100}%` }} />
       ))}
       {(zone.people || []).map((p) => (
-        <span key={p.id} className={`person ${p.status === "alert" ? "alert" : ""} ${focusId === p.id ? "focus" : ""}`}
-              style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }}>
+        <span key={p.id} className={`person ${p.status === "alert" ? "alert" : ""} ${focusId === p.id ? "focus" : ""} ${onPick ? "pickable" : ""}`}
+              style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }}
+              title={onPick ? `Subject #${p.id}` : undefined}
+              onClick={onPick ? (e) => { e.stopPropagation(); onPick(p); } : undefined}>
           {focusId === p.id && <span className="focus-ring" />}
         </span>
       ))}

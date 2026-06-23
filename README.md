@@ -74,14 +74,25 @@ A surveillance control room (`dashboard/`):
 ## Run it
 
 ```bash
-# 1. Infra (Kafka KRaft + PostgreSQL + Redis)
-docker compose up -d            # or: docker-compose up -d
-
-# 2. Gateway (Java 21) — simulation mode by default
+# 1. Gateway (Java 21) — simulation mode by default
 ./gradlew :gateway:bootRun      # :8080
 
-# 3. Dashboard (React + Vite)
+# 2. Dashboard (React + Vite)
 cd dashboard && npm install && npm run dev   # :5173
+```
+
+The simulation runs **standalone out of the box** — by default
+(`artguard.sim.direct-alerts=true`) the simulator streams the scene and
+broadcasts alerts straight to the dashboard over WebSocket, so you get the full
+experience with just the two commands above (no infra required).
+
+To exercise the full **distributed pipeline** (frames through Kafka, analyzed on
+virtual threads, persisted/deduped in Postgres + Redis, broadcast by the
+incident service), bring up the infra and disable direct alerts:
+
+```bash
+docker compose up -d            # Kafka KRaft + PostgreSQL + Redis
+./gradlew :gateway:bootRun --args='--artguard.sim.direct-alerts=false'
 ```
 
 Open the dashboard at <http://localhost:5173>. For real computer vision instead

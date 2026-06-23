@@ -1,18 +1,22 @@
 package com.artguard.gateway.scene;
 
+import com.artguard.gateway.alert.Alert;
 import com.artguard.gateway.alert.AlertSocketHandler;
 import com.artguard.gateway.alert.Envelope;
 import com.artguard.gateway.config.ArtGuardProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
@@ -51,16 +55,29 @@ public class SceneSimulator {
     private final AlertSocketHandler socket;
     private final ObjectMapper mapper;
 
+    /**
+     * When true (the default), the simulator broadcasts alerts straight to the
+     * dashboard over WebSocket — so the demo works end-to-end with just
+     * {@code ./gradlew :gateway:bootRun}, no Kafka/Postgres/Redis required.
+     * Set {@code artguard.sim.direct-alerts=false} to instead route detections
+     * through the full Kafka → analysis → IncidentService pipeline (which then
+     * owns the broadcast), avoiding duplicate alerts.
+     */
+    private final boolean directAlerts;
+
     private final List<Zone> zones = new ArrayList<>();
+    private final AtomicLong incidentSeq = new AtomicLong(1);
     private volatile boolean running = true;
     private Thread loop;
 
     public SceneSimulator(ArtGuardProperties props, KafkaTemplate<String, byte[]> kafka,
-                          AlertSocketHandler socket, ObjectMapper mapper) {
+                          AlertSocketHandler socket, ObjectMapper mapper,
+                          @Value("${artguard.sim.direct-alerts:true}") boolean directAlerts) {
         this.props = props;
         this.kafka = kafka;
         this.socket = socket;
         this.mapper = mapper;
+        this.directAlerts = directAlerts;
     }
 
     private record Zone(String id, String name, List<Person> people, List<Rect> obstacles) {}
@@ -110,6 +127,19 @@ public class SceneSimulator {
         String behavior = BEHAVIORS[r.nextInt(BEHAVIORS.length)];
         double conf = 0.6 + r.nextDouble() * 0.39;
         p.raiseAlert();   // stays flagged until an operator triages it
+
+        if (directAlerts) {
+            // Standalone demo: emit the alert straight to dashboards. A realistic
+            // sub-200ms latency keeps the SLO indicator meaningful.
+            long latency = 45 + r.nextInt(110);
+            socket.broadcast(new Alert(
+                    incidentSeq.getAndIncrement(), p.id, z.id(), z.name(),
+                    behavior, (float) conf, "OPENED", 1, latency,
+                    (float) p.x, (float) p.y, 0f, 0f, Instant.now()));
+            return;
+        }
+
+        // Full pipeline: hand off to Kafka; IncidentService owns the broadcast.
         var ev = new TrackEvent(z.id(), z.name(), p.id, behavior, conf, p.x, p.y, System.currentTimeMillis());
         try {
             kafka.send(props.kafka().framesTopic(), z.id(), mapper.writeValueAsBytes(ev));
